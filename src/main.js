@@ -50,11 +50,8 @@ const CIV_CONFIGS = {
   }
 };
 
-let currentCiv = localStorage.getItem("aoe2_selected_civ") || "empires";
-if (!CIV_CONFIGS[currentCiv]) {
-  currentCiv = "empires";
-  localStorage.setItem("aoe2_selected_civ", "empires");
-}
+// Default to Empires background and AoE4 Main Theme on startup
+let currentCiv = "empires";
 let currentVolume = parseFloat(localStorage.getItem("aoe2_music_volume") || "0.70");
 let isMuted = localStorage.getItem("aoe2_music_muted") === "true";
 
@@ -289,7 +286,6 @@ function initCivFlags() {
 function setCivilization(civKey) {
   if (!CIV_CONFIGS[civKey]) return;
   currentCiv = civKey;
-  localStorage.setItem("aoe2_selected_civ", civKey);
 
   // Update UI flags active state
   document.querySelectorAll(".civ-flag-btn").forEach((btn) => {
