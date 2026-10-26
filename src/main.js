@@ -405,20 +405,17 @@ async function validateGamePath() {
   const path = gameDirInput.value.trim();
   if (!path) {
     statusText.textContent = "Select 'Game' directory.";
-    btnAction.disabled = true;
     return false;
   }
 
   const isValid = await invoke("validate_game_directory", { path });
   if (!isValid) {
-    statusText.textContent = "AoE2DE_s.exe not found.";
-    btnAction.disabled = true;
+    statusText.textContent = "AoE2DE_s.exe not found in selected directory.";
     return false;
   }
 
   if (!isRunning) {
     statusText.textContent = "";
-    btnAction.disabled = false;
   }
   return true;
 }
@@ -464,17 +461,14 @@ async function checkRunningState() {
 
 // Form Event Listeners
 btnBrowse.addEventListener("click", async () => {
-  const tauri = getTauri();
-  if (tauri && tauri.dialog) {
-    const selected = await tauri.dialog.open({
-      directory: true,
-      multiple: false,
-      title: "Select Age of Empires II: DE 'Game' Directory",
-    });
+  try {
+    const selected = await invoke("pick_game_directory");
     if (selected) {
       gameDirInput.value = selected;
-      validateGamePath();
+      await validateGamePath();
     }
+  } catch (err) {
+    console.error("Browse error:", err);
   }
 });
 
@@ -512,7 +506,20 @@ btnAction.addEventListener("click", async () => {
   }
 
   const isPathValid = await validateGamePath();
-  if (!isPathValid) return;
+  if (!isPathValid) {
+    try {
+      const selected = await invoke("pick_game_directory");
+      if (selected) {
+        gameDirInput.value = selected;
+        const valid = await validateGamePath();
+        if (!valid) return;
+      } else {
+        return;
+      }
+    } catch {
+      return;
+    }
+  }
 
   const isHost = tabHost.classList.contains("active");
   const hostIp = isHost ? hostIpInput.value.trim() : clientHostIpInput.value.trim();
@@ -539,6 +546,7 @@ btnAction.addEventListener("click", async () => {
   } catch (err) {
     statusText.textContent = `Error: ${err}`;
     setActionState(false);
+    alert(`Cannot start game:\n\n${err}`);
   } finally {
     btnAction.disabled = false;
   }

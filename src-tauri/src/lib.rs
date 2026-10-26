@@ -224,13 +224,47 @@ fn validate_game_directory(path: String) -> bool {
 }
 
 #[tauri::command]
+fn pick_game_directory() -> Option<String> {
+    rfd::FileDialog::new()
+        .set_title("Select Age of Empires II: DE 'Game' Directory")
+        .pick_folder()
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<(), String> {
+    if prefs.game_dir.trim().is_empty() {
+        return Err("Please select your game 'Game' folder containing AoE2DE_s.exe first.".to_string());
+    }
     let game_path = Path::new(&prefs.game_dir);
     if !game_path.join("AoE2DE_s.exe").exists() {
-        return Err("AoE2DE_s.exe not found in selected game directory.".to_string());
+        return Err(format!(
+            "AoE2DE_s.exe not found in '{}'. Please select the 'Game' folder.",
+            prefs.game_dir
+        ));
     }
 
-    // 1. Update Goldberg steam_settings/configs.user.ini & persona files
+    // 1. Resolve tools directory
+    let tools_dir = resolve_tools_dir();
+    let launcher_dir = tools_dir.join("launcher");
+    let launcher_exe = launcher_dir.join("launcher.exe");
+
+    if !launcher_exe.exists() {
+        return Err("launcher.exe is missing (quarantined by Windows Defender). Please add the launcher folder to Defender Exclusions.".to_string());
+    }
+
+    if prefs.is_host {
+        let server_exe = tools_dir.join("server").join("server.exe");
+        if !server_exe.exists() {
+            return Err("server.exe is missing (quarantined by Windows Defender as Bearfoos.A!ml). Please open Windows Security -> Protection history -> find server.exe -> Allow on device.".to_string());
+        }
+        let bsm_exe = tools_dir.join("battle-server-manager").join("battle-server-manager.exe");
+        if !bsm_exe.exists() {
+            return Err("battle-server-manager.exe is missing (quarantined by Windows Defender). Please restore it from Windows Security.".to_string());
+        }
+    }
+
+    // 2. Update Goldberg steam_settings/configs.user.ini & persona files
     let settings_dir = game_path.join("steam_settings");
     let _ = fs::create_dir_all(&settings_dir);
     let user_ini_content = format!(
@@ -242,7 +276,7 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
     let _ = fs::write(settings_dir.join("force_account_name.txt"), &prefs.player_name);
     let _ = fs::write(settings_dir.join("force_steamid.txt"), &prefs.steam_id);
 
-    // 2. Fix ColdClientLoader.ini Exe=AoE2DE_s.exe
+    // 3. Fix ColdClientLoader.ini Exe=AoE2DE_s.exe
     let loader_ini = game_path.join("ColdClientLoader.ini");
     if loader_ini.exists() {
         if let Ok(content) = fs::read_to_string(&loader_ini) {
@@ -250,15 +284,6 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
             let new_content = re.replace_all(&content, "Exe=AoE2DE_s.exe");
             let _ = fs::write(&loader_ini, new_content.as_bytes());
         }
-    }
-
-    // 3. Resolve tools directory
-    let tools_dir = resolve_tools_dir();
-    let launcher_dir = tools_dir.join("launcher");
-    let launcher_exe = launcher_dir.join("launcher.exe");
-
-    if !launcher_exe.exists() {
-        return Err(format!("Luskaner launcher.exe not found at: {:?}", launcher_exe));
     }
 
     // 4. Update tools/launcher/resources/config.age2.toml
@@ -318,6 +343,7 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
     cmd.current_dir(&launcher_dir);
     cmd.arg("-e").arg("age2");
     cmd.arg("--serverSingleAutoSelect");
+    cmd.arg("--log");
 
     if prefs.is_host {
         cmd.arg("-a").arg("true");
@@ -499,6 +525,7 @@ pub fn run() {
             get_available_ips,
             generate_steam_id,
             validate_game_directory,
+            pick_game_directory,
             start_game,
             stop_game,
             is_game_running

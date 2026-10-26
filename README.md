@@ -29,6 +29,15 @@ A standalone Windows executable that configures and launches Age of Empires II: 
 5. Set your player name and Steam ID (or keep the generated defaults).
 6. Click **Start Game**.
 
+## Antivirus False Positives (Windows Defender)
+
+The embedded LAN backend (`server.exe` from `ageLANServer`) is an open-source networking binary that binds to local sockets and manages local `hosts` redirects for game matchmaking. Microsoft Defender may misclassify `server.exe` as `Bearfoos.A!ml` or `Behavior:Win32/DefenseEvasion.A!ml`.
+
+If Windows Defender blocks `server.exe`:
+1. Open **Windows Security** -> **Virus & threat protection** -> **Protection history**.
+2. Locate the blocked item for `server.exe` and select **Actions** -> **Allow on device** (or **Restore**).
+3. To prevent future false alerts, add the folder containing `AoE2_LAN_Launcher.exe` to your Windows Defender **Exclusions** list (Settings -> Virus & threat protection -> Manage settings -> Exclusions).
+
 ## Building from Source
 
 ### Prerequisites
