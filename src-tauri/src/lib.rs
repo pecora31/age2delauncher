@@ -276,6 +276,18 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
     let _ = fs::write(settings_dir.join("force_account_name.txt"), &prefs.player_name);
     let _ = fs::write(settings_dir.join("force_steamid.txt"), &prefs.steam_id);
 
+    // Prevent invisible units: disable UHD DLC 1039811 if graphics-uhd folder is missing
+    let app_ini = settings_dir.join("configs.app.ini");
+    let uhd_exists = game_path.join("resources").join("_common").join("drs").join("graphics-uhd").exists();
+    if !uhd_exists && app_ini.exists() {
+        if let Ok(content) = fs::read_to_string(&app_ini) {
+            if content.contains("unlock_all=1") {
+                let fixed = content.replace("unlock_all=1", "unlock_all=0\n1389240=Lords of the West\n1557210=Dawn of the Dukes\n1869820=Dynasties of India\n2141580=Return of Rome\n2555420=The Mountain Royals\n2805510=Victors and Vanquished\n2805520=Chronicles: Battle for Greece");
+                let _ = fs::write(&app_ini, fixed);
+            }
+        }
+    }
+
     // 3. Fix ColdClientLoader.ini Exe=AoE2DE_s.exe
     let loader_ini = game_path.join("ColdClientLoader.ini");
     if loader_ini.exists() {
