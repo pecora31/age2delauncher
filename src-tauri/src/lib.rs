@@ -276,6 +276,27 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
     let _ = fs::write(settings_dir.join("force_account_name.txt"), &prefs.player_name);
     let _ = fs::write(settings_dir.join("force_steamid.txt"), &prefs.steam_id);
 
+    // Also write into local settings subfolder (used by some Goldberg variants)
+    let local_sub_settings = settings_dir.join("settings");
+    let _ = fs::create_dir_all(&local_sub_settings);
+    let _ = fs::write(local_sub_settings.join("account_name.txt"), &prefs.player_name);
+    let _ = fs::write(local_sub_settings.join("user_steam_id.txt"), &prefs.steam_id);
+    let _ = fs::write(local_sub_settings.join("persona_name.txt"), &prefs.player_name);
+
+    // Also update global AppData Goldberg / GSE directories to overwrite old repack names (e.g. 'zeigame')
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let appdata_path = PathBuf::from(appdata);
+
+        let gse_settings = appdata_path.join("GSE Saves").join("settings");
+        let _ = fs::create_dir_all(&gse_settings);
+        let _ = fs::write(gse_settings.join("configs.user.ini"), &user_ini_content);
+
+        let goldberg_settings = appdata_path.join("Goldberg SteamEmu Saves").join("settings");
+        let _ = fs::create_dir_all(&goldberg_settings);
+        let _ = fs::write(goldberg_settings.join("account_name.txt"), &prefs.player_name);
+        let _ = fs::write(goldberg_settings.join("user_steam_id.txt"), &prefs.steam_id);
+    }
+
     // Prevent invisible units: disable UHD DLC 1039811 if graphics-uhd folder is missing
     let app_ini = settings_dir.join("configs.app.ini");
     let uhd_exists = game_path.join("resources").join("_common").join("drs").join("graphics-uhd").exists();
