@@ -1,0 +1,556 @@
+@font-face {
+  font-family: 'Trajan Pro';
+  src: url('assets/fonts/TrajanPro-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Trajan Pro';
+  src: url('assets/fonts/TrajanPro-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
+
+:root {
+  --gold-primary: #d8b154;
+  --gold-bright: #fff2bd;
+  --gold-dark: #8c6d1d;
+  --gold-hairline: rgba(216, 177, 84, 0.35);
+  --bg-card: rgba(13, 16, 22, 0.85);
+  --bg-well: rgba(8, 10, 14, 0.9);
+  --border-well: rgba(216, 177, 84, 0.28);
+  --text-main: #f5eedd;
+  --text-muted: #948b78;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #08090d;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text-main);
+}
+
+/* Widescreen Stage with Dual Dissolve Background Layers */
+.stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #08090d;
+}
+
+.stage-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  transition: opacity 1.2s ease-in-out;
+  opacity: 0;
+  z-index: 0;
+}
+
+.stage-bg.active {
+  opacity: 1;
+  z-index: 1;
+}
+
+/* Subtle AoE4 Documentary Vignette */
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(8, 10, 14, 0.15) 0%, rgba(8, 10, 14, 0.62) 100%);
+  z-index: 2;
+}
+
+/* Floating Left Slate Tablet with AoE4 Glassmorphism */
+.tablet-card {
+  position: absolute;
+  top: 36px;
+  left: 48px;
+  width: 490px;
+  background: var(--bg-card);
+  backdrop-filter: blur(28px) saturate(120%);
+  -webkit-backdrop-filter: blur(28px) saturate(120%);
+  border: 1px solid var(--gold-hairline);
+  border-radius: 6px;
+  box-shadow: 
+    0 24px 60px rgba(0, 0, 0, 0.85),
+    inset 0 0 24px rgba(0, 0, 0, 0.5);
+  padding: 26px 26px 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  z-index: 10;
+}
+
+/* Signature AoE4 Corner Bracket Tick Marks */
+.bracket {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+}
+
+.bracket.top-left {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--gold-primary);
+  border-left: 2px solid var(--gold-primary);
+}
+
+.bracket.top-right {
+  top: -1px;
+  right: -1px;
+  border-top: 2px solid var(--gold-primary);
+  border-right: 2px solid var(--gold-primary);
+}
+
+.bracket.bottom-left {
+  bottom: -1px;
+  left: -1px;
+  border-bottom: 2px solid var(--gold-primary);
+  border-left: 2px solid var(--gold-primary);
+}
+
+.bracket.bottom-right {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid var(--gold-primary);
+  border-right: 2px solid var(--gold-primary);
+}
+
+/* AoE4 Minimalist Regal Title */
+.card-branding {
+  text-align: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(216, 177, 84, 0.22);
+}
+
+.title-main {
+  font-family: 'Trajan Pro', serif;
+  font-size: 27px;
+  font-weight: bold;
+  letter-spacing: 5px;
+  background: linear-gradient(180deg, #fff7de 0%, #e0be6c 55%, #9e7a25 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.85));
+}
+
+.title-sub {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  color: #c5a66a;
+  margin-top: 3px;
+}
+
+/* Sections & Fields */
+.field-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field-label {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #c5a66a;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+/* AoE4 Segmented Switch */
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.mode-tab {
+  position: relative;
+  background: rgba(18, 22, 30, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 11px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.18s ease-in-out;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mode-tab:hover {
+  background: rgba(26, 32, 44, 0.9);
+  border-color: rgba(216, 177, 84, 0.45);
+}
+
+.mode-tab.active {
+  background: linear-gradient(180deg, rgba(46, 38, 22, 0.95) 0%, rgba(22, 18, 12, 0.95) 100%);
+  border: 1.5px solid var(--gold-primary);
+  box-shadow: 0 0 16px rgba(216, 177, 84, 0.28);
+}
+
+.tab-title {
+  font-family: 'Trajan Pro', serif;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: #f7eed9;
+}
+
+.tab-sub {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 8.5px;
+  letter-spacing: 0.8px;
+  color: #8c8270;
+}
+
+.mode-tab.active .tab-sub {
+  color: #d8b45c;
+}
+
+/* Deep Obsidian Wells */
+.input-well {
+  position: relative;
+  background: var(--bg-well);
+  border: 1px solid var(--border-well);
+  border-radius: 4px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8);
+  transition: all 0.15s ease-in-out;
+}
+
+.input-well:focus-within {
+  border-color: var(--gold-primary);
+  box-shadow: 
+    0 0 12px rgba(216, 177, 84, 0.35),
+    inset 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.input-well input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-family: 'Trajan Pro', "Georgia", serif;
+  font-size: 13.5px;
+  letter-spacing: 0.5px;
+}
+
+.input-well input::placeholder {
+  color: #68645a;
+  font-style: italic;
+  font-size: 12.5px;
+}
+
+.input-with-select select {
+  background: rgba(24, 28, 38, 0.95);
+  border: 1px solid var(--border-well);
+  border-radius: 4px;
+  color: var(--gold-bright);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11.5px;
+  font-weight: 500;
+  height: 28px;
+  padding: 0 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.well-btn {
+  height: 28px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #2a3140 0%, #1a1e28 100%);
+  border: 1px solid var(--border-well);
+  border-radius: 4px;
+  color: var(--gold-bright);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.well-btn:hover {
+  background: linear-gradient(180deg, #384256 0%, #242a38 100%);
+  border-color: var(--gold-primary);
+  color: #ffffff;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Status Indicator */
+.card-status {
+  min-height: 20px;
+  margin-top: 2px;
+}
+
+.status-msg {
+  font-size: 11.5px;
+  color: var(--gold-bright);
+  font-style: italic;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+/* Clean Minimalist Civilization Flag Dock */
+.civ-dock {
+  position: absolute;
+  bottom: 26px;
+  left: 48px;
+  z-index: 10;
+}
+
+.civ-flags {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.civ-flag-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  transition: transform 0.18s ease-out;
+  outline: none;
+}
+
+.civ-flag-btn:hover {
+  transform: translateY(-4px);
+}
+
+.civ-flag-btn.active {
+  transform: translateY(-2px);
+}
+
+.flag-icon {
+  width: 58px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.75);
+  transition: all 0.18s ease-in-out;
+}
+
+.civ-flag-btn:hover .flag-icon {
+  border-color: #fff4cb;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.9), 0 0 12px rgba(216, 177, 84, 0.5);
+}
+
+.civ-flag-btn.active .flag-icon {
+  border: 2px solid var(--gold-bright);
+  box-shadow: 0 0 16px rgba(224, 185, 92, 0.8), 0 6px 14px rgba(0, 0, 0, 0.9);
+}
+
+.flag-icon.crest {
+  object-fit: contain;
+  border: none;
+  box-shadow: none;
+  filter: drop-shadow(0 2px 6px rgba(216, 177, 84, 0.7));
+}
+
+.civ-flag-btn:hover .flag-icon.crest {
+  filter: drop-shadow(0 0 10px rgba(255, 245, 205, 0.95)) drop-shadow(0 2px 8px rgba(0, 0, 0, 0.9));
+}
+
+.civ-flag-btn.active .flag-icon.crest {
+  filter: drop-shadow(0 0 14px rgba(224, 185, 92, 0.95)) drop-shadow(0 2px 8px rgba(0, 0, 0, 0.9));
+}
+
+.flag-label {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #d1c7b7;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  transition: color 0.18s ease;
+}
+
+.civ-flag-btn:hover .flag-label {
+  color: #ffffff;
+}
+
+.civ-flag-btn.active .flag-label {
+  color: var(--gold-bright);
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(216, 177, 84, 0.9), 0 2px 4px #000000;
+}
+
+/* Top-Right Music & Volume Controls */
+.top-nav {
+  position: absolute;
+  top: 36px;
+  right: 48px;
+  z-index: 10;
+}
+
+.volume-dock {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--gold-hairline);
+  border-radius: 4px;
+  padding: 4px 10px 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.music-square-btn {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  color: var(--gold-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.18s ease;
+}
+
+.music-square-btn:hover {
+  color: #ffffff;
+  transform: scale(1.08);
+}
+
+.music-svg {
+  width: 20px;
+  height: 20px;
+}
+
+.volume-slider-box {
+  display: flex;
+  align-items: center;
+  width: 80px;
+}
+
+#volumeSlider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#volumeSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--gold-primary);
+  box-shadow: 0 0 6px var(--gold-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+#volumeSlider::-webkit-slider-thumb:hover {
+  background: #ffffff;
+  box-shadow: 0 0 10px #ffffff;
+  transform: scale(1.2);
+}
+
+/* Bottom-Right Start Button Dock */
+.action-dock {
+  position: absolute;
+  right: 48px;
+  bottom: 36px;
+  z-index: 10;
+}
+
+/* The Signature AoE4 Illuminated Gold Action Bar */
+.btn-royal-start {
+  position: relative;
+  width: 320px;
+  height: 56px;
+  background: linear-gradient(180deg, #fceda6 0%, #d8b154 40%, #a27920 100%);
+  border: 1.5px solid #fff2bd;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 
+    0 10px 28px rgba(0, 0, 0, 0.85),
+    0 0 24px rgba(216, 177, 84, 0.45);
+  transition: all 0.16s ease-in-out;
+  outline: none;
+}
+
+.btn-royal-start:hover {
+  background: linear-gradient(180deg, #fff5c7 0%, #e2bc5e 40%, #b38827 100%);
+  border-color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 
+    0 14px 36px rgba(0, 0, 0, 0.95),
+    0 0 36px rgba(224, 185, 92, 0.75);
+}
+
+.btn-royal-start:active {
+  transform: translateY(1px);
+  box-shadow: 
+    0 6px 16px rgba(0, 0, 0, 0.8),
+    0 0 16px rgba(216, 177, 84, 0.35);
+}
+
+.btn-royal-start:disabled {
+  opacity: 0.5;
+  filter: grayscale(0.6);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-royal-start.btn-running {
+  background: linear-gradient(180deg, #374151 0%, #1f2937 50%, #111827 100%);
+  border-color: #6b7280;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.8);
+}
+
+.btn-royal-start.btn-running .btn-text {
+  color: #f3f4f6;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.btn-text {
+  font-family: 'Trajan Pro', serif;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #0c0802;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.7);
+  -webkit-text-stroke: 0.8px #0c0802;
+}

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Age of Empires - LAN Launcher</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Full Window Scenic Stage with Dual Dissolve Layers -->
+  <div class="stage">
+    <div id="bgLayer1" class="stage-bg active" style="background-image: url('assets/images/default_bg.jpg');"></div>
+    <div id="bgLayer2" class="stage-bg" style="background-image: url('assets/images/default_bg.jpg');"></div>
+
+    <!-- Top Right Music & Volume Controls -->
+    <div class="top-nav">
+      <div class="volume-dock">
+        <button type="button" id="btnMusicToggle" class="music-square-btn" title="Toggle Music">
+          <svg id="musicIconOn" class="music-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+          </svg>
+          <svg id="musicIconOff" class="music-svg hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <line x1="23" y1="9" x2="17" y2="15"></line>
+            <line x1="17" y1="9" x2="23" y2="15"></line>
+          </svg>
+        </button>
+        <div class="volume-slider-box">
+          <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.70" title="Adjust Volume" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Left Tablet Card -->
+    <aside class="tablet-card">
+      <!-- AoE4 Signature Corner Brackets -->
+      <span class="bracket top-left"></span>
+      <span class="bracket top-right"></span>
+      <span class="bracket bottom-left"></span>
+      <span class="bracket bottom-right"></span>
+      
+      <!-- AoE4 Elegant Minimalist Title -->
+      <div class="card-branding">
+        <div class="title-main">AGE OF EMPIRES</div>
+        <div class="title-sub">LAN LAUNCHER</div>
+      </div>
+
+      <!-- Mode Selector: AoE4 Segmented Switch -->
+      <div class="field-section">
+        <div class="mode-tabs">
+          <button type="button" id="tabHost" class="mode-tab active">
+            <span class="tab-title">HOST SERVER</span>
+            <span class="tab-sub">RUN BATTLESERVER</span>
+          </button>
+          <button type="button" id="tabClient" class="mode-tab">
+            <span class="tab-title">JOIN GAME</span>
+            <span class="tab-sub">CONNECT TO HOST</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Dynamic Network Panel -->
+      <div id="panelHost" class="field-section">
+        <label for="hostIp" class="field-label">RADMIN HOST IP</label>
+        <div class="input-well input-with-select">
+          <input type="text" id="hostIp" spellcheck="false" autocomplete="off" />
+          <select id="selectDetectedIps" title="Select Network Adapter IP"></select>
+        </div>
+      </div>
+
+      <div id="panelClient" class="field-section hidden">
+        <label for="clientHostIp" class="field-label">RADMIN HOST IP</label>
+        <div class="input-well">
+          <input type="text" id="clientHostIp" placeholder="Enter Host's Radmin IP (e.g. 26.x.x.x)" spellcheck="false" autocomplete="off" />
+        </div>
+      </div>
+
+      <!-- Player Name -->
+      <div class="field-section">
+        <label for="playerName" class="field-label">PLAYER NAME</label>
+        <div class="input-well">
+          <input type="text" id="playerName" maxlength="32" spellcheck="false" autocomplete="off" placeholder="Your in-game name" />
+        </div>
+      </div>
+
+      <!-- Steam ID -->
+      <div class="field-section">
+        <label for="steamId" class="field-label">STEAM ID</label>
+        <div class="input-well input-with-addon">
+          <input type="text" id="steamId" maxlength="20" spellcheck="false" autocomplete="off" />
+          <button type="button" id="btnGenSteamId" class="well-btn" title="Generate Random Steam ID">ROLL</button>
+        </div>
+      </div>
+
+      <!-- Game Directory -->
+      <div class="field-section">
+        <label for="gameDir" class="field-label">GAME DIRECTORY</label>
+        <div class="input-well input-with-addon">
+          <input type="text" id="gameDir" spellcheck="false" autocomplete="off" readonly />
+          <button type="button" id="btnBrowse" class="well-btn">BROWSE</button>
+        </div>
+      </div>
+
+      <!-- Status Indicator -->
+      <div class="card-status">
+        <span id="statusText" class="status-msg"></span>
+      </div>
+
+    </aside>
+
+    <!-- Bottom Left Civilization Flag Dock -->
+    <div class="civ-dock">
+      <div class="civ-flags">
+        <button type="button" class="civ-flag-btn active" data-civ="empires" title="Empires - AoE4 Main Theme">
+          <img src="assets/images/aoe_logo_gold.png" alt="Empires" class="flag-icon crest" />
+          <span class="flag-label">Empires</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="rus" title="Rus - Dawn of Glory (1:25)">
+          <img src="assets/images/flags/rus.png" alt="Rus" class="flag-icon" />
+          <span class="flag-label">Rus</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="delhi" title="Delhi Sultanate - Dawn of Glory (2:22)">
+          <img src="assets/images/flags/delhi.png" alt="Delhi" class="flag-icon" />
+          <span class="flag-label">Delhi</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="hre" title="Holy Roman Empire - Dawn of Glory (3:07)">
+          <img src="assets/images/flags/hre.png" alt="H.R.E" class="flag-icon" />
+          <span class="flag-label">H.R.E</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="french" title="French - Dawn of Glory (3:45)">
+          <img src="assets/images/flags/french.png" alt="French" class="flag-icon" />
+          <span class="flag-label">French</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="mongols" title="Mongols - Dawn of Glory (4:19)">
+          <img src="assets/images/flags/mongols.png" alt="Mongols" class="flag-icon" />
+          <span class="flag-label">Mongols</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="abbasid" title="Abbasid Dynasty - Dawn of Glory (5:00)">
+          <img src="assets/images/flags/abbasid.png" alt="Abbasid" class="flag-icon" />
+          <span class="flag-label">Abbasid</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="chinese" title="Chinese - Dawn of Glory (5:47)">
+          <img src="assets/images/flags/chinese.png" alt="Chinese" class="flag-icon" />
+          <span class="flag-label">Chinese</span>
+        </button>
+        <button type="button" class="civ-flag-btn" data-civ="english" title="English - Dawn of Glory (6:20)">
+          <img src="assets/images/flags/english.png" alt="English" class="flag-icon" />
+          <span class="flag-label">English</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom Right Action Dock -->
+    <div class="action-dock">
+      <button type="button" id="btnAction" class="btn-royal-start">
+        <span id="btnActionText" class="btn-text">START GAME</span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Dual Audio Channels for Seamless Adaptive Cross-fade -->
+  <audio id="audioA" loop preload="auto"></audio>
+  <audio id="audioB" loop preload="auto"></audio>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
