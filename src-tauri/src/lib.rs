@@ -238,6 +238,87 @@ fn cleanup_launcher_logs(tools_dir: &Path) {
     }
 }
 
+fn ensure_firewall_rules(game_dir: &Path, tools_dir: &Path) {
+    let aoe2_exe = game_dir.join("AoE2DE_s.exe");
+    let server_exe = tools_dir.join("server").join("server.exe");
+    let bserver_exe = tools_dir.join("battle-server-manager").join("BattleServer.exe");
+
+    if aoe2_exe.exists() {
+        let _ = Command::new("netsh")
+            .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Game_DirectLAN", "dir=in", "action=allow", &format!("program={}", aoe2_exe.to_string_lossy()), "enable=yes"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    if server_exe.exists() {
+        let _ = Command::new("netsh")
+            .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Server_DirectLAN", "dir=in", "action=allow", &format!("program={}", server_exe.to_string_lossy()), "enable=yes"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    if bserver_exe.exists() {
+        let _ = Command::new("netsh")
+            .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_BattleServer_DirectLAN", "dir=in", "action=allow", &format!("program={}", bserver_exe.to_string_lossy()), "enable=yes"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    let _ = Command::new("netsh")
+        .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Ports_UDP_DirectLAN", "dir=in", "action=allow", "protocol=UDP", "localport=27015,30000-30020,31978", "enable=yes"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    let _ = Command::new("netsh")
+        .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Ports_TCP_DirectLAN", "dir=in", "action=allow", "protocol=TCP", "localport=80,443,30000-30020", "enable=yes"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+fn clean_stale_hosts_file() {
+    let hosts_path = Path::new(r"C:\Windows\System32\drivers\etc\hosts");
+    if hosts_path.exists() {
+        if let Ok(content) = fs::read_to_string(hosts_path) {
+            let patterns = [
+                "worldsedgelink.com",
+                "reliclink.com",
+                "ageofempires.com",
+                "playfabapi.com",
+            ];
+            let mut modified = false;
+            let cleaned_lines: Vec<&str> = content
+                .lines()
+                .filter(|line| {
+                    for pat in &patterns {
+                        if line.contains(pat) {
+                            modified = true;
+                            return false;
+                        }
+                    }
+                    true
+                })
+                .collect();
+
+            if modified {
+                let mut new_content = cleaned_lines.join("\r\n");
+                if !new_content.ends_with("\r\n") {
+                    new_content.push_str("\r\n");
+                }
+                let _ = fs::write(hosts_path, new_content);
+            }
+        }
+    }
+}
+
+fn revert_network_routing(game_dir: &str, tools_dir: &Path) {
+    if !game_dir.is_empty() {
+        let config_exe = tools_dir.join("launcher").join("bin").join("config.exe");
+        if config_exe.exists() {
+            let _ = Command::new(&config_exe)
+                .args(["revert", "-e", "age2", "-i", "-l", "-s", "--gamePath", game_dir])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+        }
+    }
+    clean_stale_hosts_file();
+}
+
 fn install_clean_vfx_mod(steam_id: &str) {
     if steam_id.trim().is_empty() {
         return;
@@ -478,6 +559,7 @@ fn start_game(
     // 6. Performance & Mod preparation
     cleanup_launcher_logs(&tools_dir);
     install_clean_vfx_mod(&prefs.steam_id);
+    ensure_firewall_rules(game_path, &tools_dir);
 
     // Stop any dangling instances first
     let _ = Command::new("taskkill")
@@ -629,18 +711,10 @@ fn stop_game(state: State<'_, AppState>) -> Result<(), String> {
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 
-    // Revert hosts and certs via config.exe
+    // Revert hosts, certs and clean system hosts file
     let prefs = load_preferences();
-    if !prefs.game_dir.is_empty() {
-        let tools_dir = resolve_tools_dir();
-        let config_exe = tools_dir.join("launcher").join("bin").join("config.exe");
-        if config_exe.exists() {
-            let _ = Command::new(&config_exe)
-                .args(["revert", "-e", "age2", "-i", "-l", "-s", "--gamePath", &prefs.game_dir])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
-        }
-    }
+    let tools_dir = resolve_tools_dir();
+    revert_network_routing(&prefs.game_dir, &tools_dir);
 
     Ok(())
 }
@@ -687,6 +761,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .setup(|_app| {
+            let prefs = load_preferences();
+            let tools_dir = resolve_tools_dir();
+            if !is_process_running("AoE2DE_s.exe") && !is_process_running("launcher.exe") {
+                revert_network_routing(&prefs.game_dir, &tools_dir);
+            }
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -710,6 +789,9 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let state = window.state::<AppState>();
                 let _ = stop_game(state);
+                let prefs = load_preferences();
+                let tools_dir = resolve_tools_dir();
+                revert_network_routing(&prefs.game_dir, &tools_dir);
             }
         })
         .run(tauri::generate_context!())
