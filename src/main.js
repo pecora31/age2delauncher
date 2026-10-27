@@ -171,7 +171,14 @@ async function init() {
 
     // Check if game is already running
     checkRunningState();
-    setInterval(checkRunningState, 1500);
+    setInterval(checkRunningState, 10000);
+
+    // Listen for background game-stopped event from Rust watcher
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      window.__TAURI__.event.listen("game-stopped", () => {
+        handleGameStopped();
+      });
+    }
 
     // Initialize Adaptive Media & Volume
     initMedia();
@@ -428,19 +435,47 @@ function setControlsEnabled(enabled) {
   clientHostIpInput.disabled = !enabled;
 }
 
+function pauseBackgroundAudio() {
+  audioA.pause();
+  audioB.pause();
+  if (audioCtx && audioCtx.state === "running") {
+    audioCtx.suspend().catch(() => {});
+  }
+}
+
+function resumeBackgroundAudio() {
+  if (!isMuted && currentVolume > 0) {
+    if (audioCtx && audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+    activeAudio.play().catch(() => {});
+  }
+}
+
 function setActionState(running) {
   isRunning = running;
   if (running) {
     btnActionText.textContent = "STOP GAME";
     btnAction.classList.add("btn-running");
     setControlsEnabled(false);
-    statusText.textContent = "Game session active.";
+    statusText.textContent = "Game session active. Launcher minimized for best FPS.";
+    pauseBackgroundAudio();
   } else {
     btnActionText.textContent = "START GAME";
     btnAction.classList.remove("btn-running");
     setControlsEnabled(true);
     statusText.textContent = "";
     validateGamePath();
+    resumeBackgroundAudio();
+  }
+}
+
+async function handleGameStopped() {
+  if (isRunning) {
+    try {
+      await invoke("stop_game");
+    } catch {}
+    setActionState(false);
   }
 }
 
@@ -448,8 +483,7 @@ async function checkRunningState() {
   try {
     const running = await invoke("is_game_running");
     if (isRunning && !running) {
-      await invoke("stop_game");
-      setActionState(false);
+      handleGameStopped();
     }
   } catch {
   }

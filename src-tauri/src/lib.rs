@@ -6,7 +6,7 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State, Window};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -231,8 +231,120 @@ fn pick_game_directory() -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
+fn cleanup_launcher_logs(tools_dir: &Path) {
+    let logs_dir = tools_dir.join("launcher").join("logs");
+    if logs_dir.exists() {
+        let _ = fs::remove_dir_all(&logs_dir);
+    }
+}
+
+fn install_clean_vfx_mod(steam_id: &str) {
+    if steam_id.trim().is_empty() {
+        return;
+    }
+    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+        let base_games = PathBuf::from(user_profile)
+            .join("Games")
+            .join("Age of Empires 2 DE")
+            .join(steam_id);
+        let mod_dir = base_games.join("mods").join("local").join("Clean_VFX_Performance");
+        let particles_dir = mod_dir.join("resources").join("_common").join("particles");
+
+        if fs::create_dir_all(&particles_dir).is_err() {
+            return;
+        }
+
+        let info_json = r#"{
+    "Author": "AoE2 LAN Launcher",
+    "Category": "Graphics",
+    "Description": "Optimizes projectile particle effects and eliminates heavy smoke trails for smooth gameplay and crash prevention.",
+    "ID": 0,
+    "Manifest": [],
+    "ModVersion": "1.0",
+    "PublishTimestamp": 0,
+    "SteamPublishedFileID": 0,
+    "Title": "Clean VFX Performance",
+    "Version": "1.0"
+}"#;
+        let _ = fs::write(mod_dir.join("info.json"), info_json);
+
+        let dummy_particle = r#"{
+	"Type": "Once",
+	"Duration": 0.01,
+	"ImageCount": 0,
+	"ScaleStart1": 0.0,
+	"ScaleStart2": 0.0,
+	"ScaleEnd1": 0.0,
+	"ScaleEnd2": 0.0,
+	"AlphaStart": 0.0,
+	"AlphaEnd": 0.0
+}"#;
+
+        let particle_files = [
+            "flame_trail.json",
+            "smoke_trail.json",
+            "smoke_trail_dark.json",
+            "smoke_trail_gunpowder.json",
+            "smoke_hit.json",
+            "poison_trail.json",
+            "unit_dust_trail.json",
+            "unit_dust_trail_cavalry.json",
+            "unit_dust_trail_infantry.json",
+        ];
+
+        for file in &particle_files {
+            let _ = fs::write(particles_dir.join(file), dummy_particle);
+        }
+
+        let mod_status_path = base_games.join("mods").join("mod-status.json");
+        if mod_status_path.exists() {
+            if let Ok(content) = fs::read_to_string(&mod_status_path) {
+                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(mods_arr) = json.get_mut("Mods").and_then(|v| v.as_array_mut()) {
+                        let mut found = false;
+                        for m in mods_arr.iter_mut() {
+                            if m.get("Path").and_then(|p| p.as_str()) == Some("Clean_VFX_Performance") {
+                                m["Enabled"] = serde_json::Value::Bool(true);
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            let new_entry = serde_json::json!({
+                                "CheckSum": "",
+                                "Enabled": true,
+                                "Path": "Clean_VFX_Performance",
+                                "Priority": 1,
+                                "Title": "Clean VFX Performance"
+                            });
+                            mods_arr.push(new_entry);
+                        }
+                        let _ = fs::write(&mod_status_path, json.to_string());
+                    }
+                }
+            }
+        } else {
+            let initial_json = serde_json::json!({
+                "Mods": [{
+                    "CheckSum": "",
+                    "Enabled": true,
+                    "Path": "Clean_VFX_Performance",
+                    "Priority": 1,
+                    "Title": "Clean VFX Performance"
+                }],
+                "Unsub": []
+            });
+            let _ = fs::write(&mod_status_path, initial_json.to_string());
+        }
+    }
+}
+
 #[tauri::command]
-fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<(), String> {
+fn start_game(
+    prefs: LauncherPreferences,
+    window: Window,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     if prefs.game_dir.trim().is_empty() {
         return Err("Please select your game 'Game' folder containing AoE2DE_s.exe first.".to_string());
     }
@@ -363,7 +475,11 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
         }
     }
 
-    // 6. Stop any dangling instances first
+    // 6. Performance & Mod preparation
+    cleanup_launcher_logs(&tools_dir);
+    install_clean_vfx_mod(&prefs.steam_id);
+
+    // Stop any dangling instances first
     let _ = Command::new("taskkill")
         .args(["/F", "/IM", "launcher.exe", "/IM", "server.exe", "/IM", "BattleServer.exe", "/IM", "agent.exe"])
         .creation_flags(CREATE_NO_WINDOW)
@@ -371,12 +487,11 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
 
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    // 7. Spawn Luskaner's launcher.exe
+    // 7. Spawn Luskaner's launcher.exe (without --log to prevent disk I/O lag)
     let mut cmd = Command::new(&launcher_exe);
     cmd.current_dir(&launcher_dir);
     cmd.arg("-e").arg("age2");
     cmd.arg("--serverSingleAutoSelect");
-    cmd.arg("--log");
 
     if prefs.is_host {
         cmd.arg("-a").arg("true");
@@ -393,6 +508,34 @@ fn start_game(prefs: LauncherPreferences, state: State<'_, AppState>) -> Result<
 
     // Save preferences
     let _ = save_preferences(prefs);
+
+    // 8. Background Watcher: Minimize launcher window to release GPU/VRAM to AoE2 DE,
+    // then restore window and notify UI when game finishes.
+    let window_clone = window.clone();
+    std::thread::spawn(move || {
+        // Wait for game process to start (poll up to 30 times * 500ms = 15s)
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if is_process_running("AoE2DE_s.exe") {
+                break;
+            }
+        }
+        // Give game a moment to initialize display, then minimize launcher
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let _ = window_clone.minimize();
+
+        // Dormant watcher: sleeps 4 seconds between lightweight checks
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            if !is_process_running("AoE2DE_s.exe") && !is_process_running("launcher.exe") {
+                let _ = window_clone.unminimize();
+                let _ = window_clone.show();
+                let _ = window_clone.set_focus();
+                let _ = window_clone.emit("game-stopped", ());
+                break;
+            }
+        }
+    });
 
     Ok(())
 }
