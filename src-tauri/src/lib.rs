@@ -10,8 +10,6 @@ use tauri::{Emitter, Manager, State, Window};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-static AOE2_FIX_LOBBY_NAME_DLL: &[u8] = include_bytes!("../resources/AoE2FixLobbyName.dll");
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherPreferences {
     pub game_dir: String,
@@ -504,10 +502,11 @@ fn start_game(
         }
     }
 
-    // Deploy companion DLL AoE2FixLobbyName.dll into game's dlls folder
-    let dll_dir = game_path.join("dlls");
-    let _ = fs::create_dir_all(&dll_dir);
-    let _ = fs::write(dll_dir.join("AoE2FixLobbyName.dll"), AOE2_FIX_LOBBY_NAME_DLL);
+    // Clean up any legacy AoE2FixLobbyName.dll to prevent MSVC CRT thread crash
+    let legacy_fix_dll = game_path.join("dlls").join("AoE2FixLobbyName.dll");
+    if legacy_fix_dll.exists() {
+        let _ = fs::remove_file(legacy_fix_dll);
+    }
 
     // 3. Fix ColdClientLoader.ini Exe=AoE2DE_s.exe
     let loader_ini = game_path.join("ColdClientLoader.ini");
@@ -602,9 +601,9 @@ fn start_game(
     // apply live memory patch for Lobby Name sanitization, and restore window when game finishes.
     let window_clone = window.clone();
     std::thread::spawn(move || {
-        // Wait for game process to start (poll up to 30 times * 500ms = 15s)
+        // Wait for game process to start (poll up to 60 times * 500ms = 30s)
         let mut aoe_pid = None;
-        for _ in 0..30 {
+        for _ in 0..60 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if let Some(pid) = get_process_id("AoE2DE_s.exe") {
                 aoe_pid = Some(pid);
@@ -722,6 +721,13 @@ fn is_process_running(process_name: &str) -> bool {
     get_process_id(process_name).is_some()
 }
 
+fn log_lobby_patch(msg: &str) {
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open("C:\\Games\\lobby_fix.log") {
+        use std::io::Write;
+        let _ = writeln!(f, "[Launcher Memory Patch] {}", msg);
+    }
+}
+
 fn patch_aoe2_lobby_name_in_memory(pid: u32) -> bool {
     const PROCESS_ALL_ACCESS: u32 = 0x001F0FFF;
     const MEM_COMMIT: u32 = 0x1000;
@@ -729,14 +735,17 @@ fn patch_aoe2_lobby_name_in_memory(pid: u32) -> bool {
     const PAGE_EXECUTE_READ: u32 = 0x20;
     const PATTERN: [u8; 12] = [0x48, 0x83, 0x7d, 0x07, 0x00, 0x75, 0x12, 0x41, 0xc6, 0x46, 0x61, 0x01];
 
+    log_lobby_patch(&format!("Attaching to AoE2DE_s.exe (PID: {})...", pid));
+
     unsafe {
         let h_proc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
         if h_proc.is_null() {
+            log_lobby_patch(&format!("Failed to open process PID {} (error: {})", pid, std::io::Error::last_os_error()));
             return false;
         }
 
-        // Try up to 30 times (polling every 500ms = 15s) for SteamStub to decrypt .text
-        for _ in 0..30 {
+        // Try up to 60 times (polling every 500ms = 30s) for SteamStub to decrypt .text
+        for attempt in 1..=60 {
             std::thread::sleep(std::time::Duration::from_millis(500));
 
             let mut addr = 0usize;
@@ -751,6 +760,7 @@ fn patch_aoe2_lobby_name_in_memory(pid: u32) -> bool {
                     if ReadProcessMemory(h_proc, mbi.BaseAddress as *const _, buf.as_mut_ptr() as *mut _, buf.len(), &mut bytes_read) != 0 {
                         if let Some(pos) = buf[..bytes_read].windows(PATTERN.len()).position(|w| w == PATTERN) {
                             let patch_addr = (mbi.BaseAddress as usize + pos + 5) as *mut std::ffi::c_void;
+                            log_lobby_patch(&format!("Found pattern at {:p} on attempt {}! Applying NOP NOP...", patch_addr, attempt));
                             let mut old_protect = 0;
                             if VirtualProtectEx(h_proc, patch_addr, 2, PAGE_EXECUTE_READWRITE, &mut old_protect) != 0 {
                                 let nops: [u8; 2] = [0x90, 0x90];
@@ -759,7 +769,10 @@ fn patch_aoe2_lobby_name_in_memory(pid: u32) -> bool {
                                 VirtualProtectEx(h_proc, patch_addr, 2, old_protect, &mut old_protect);
                                 FlushInstructionCache(h_proc, patch_addr, 2);
                                 CloseHandle(h_proc);
+                                log_lobby_patch("Successfully patched lobby name sanitization instruction in memory!");
                                 return true;
+                            } else {
+                                log_lobby_patch(&format!("VirtualProtectEx failed (error: {})", std::io::Error::last_os_error()));
                             }
                         }
                     }
@@ -772,6 +785,7 @@ fn patch_aoe2_lobby_name_in_memory(pid: u32) -> bool {
             }
         }
 
+        log_lobby_patch("Pattern not found in memory after 30 seconds.");
         CloseHandle(h_proc);
         false
     }
