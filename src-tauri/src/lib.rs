@@ -10,6 +10,8 @@ use tauri::{Emitter, Manager, State, Window};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+static AOE2_FIX_LOBBY_NAME_DLL: &[u8] = include_bytes!("../resources/AoE2FixLobbyName.dll");
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherPreferences {
     pub game_dir: String,
@@ -502,6 +504,11 @@ fn start_game(
         }
     }
 
+    // Deploy companion DLL AoE2FixLobbyName.dll into game's dlls folder
+    let dll_dir = game_path.join("dlls");
+    let _ = fs::create_dir_all(&dll_dir);
+    let _ = fs::write(dll_dir.join("AoE2FixLobbyName.dll"), AOE2_FIX_LOBBY_NAME_DLL);
+
     // 3. Fix ColdClientLoader.ini Exe=AoE2DE_s.exe
     let loader_ini = game_path.join("ColdClientLoader.ini");
     if loader_ini.exists() {
@@ -592,16 +599,26 @@ fn start_game(
     let _ = save_preferences(prefs);
 
     // 8. Background Watcher: Minimize launcher window to release GPU/VRAM to AoE2 DE,
-    // then restore window and notify UI when game finishes.
+    // apply live memory patch for Lobby Name sanitization, and restore window when game finishes.
     let window_clone = window.clone();
     std::thread::spawn(move || {
         // Wait for game process to start (poll up to 30 times * 500ms = 15s)
+        let mut aoe_pid = None;
         for _ in 0..30 {
             std::thread::sleep(std::time::Duration::from_millis(500));
-            if is_process_running("AoE2DE_s.exe") {
+            if let Some(pid) = get_process_id("AoE2DE_s.exe") {
+                aoe_pid = Some(pid);
                 break;
             }
         }
+
+        // Asynchronously apply in-memory patch for instant lobby name creation
+        if let Some(pid) = aoe_pid {
+            std::thread::spawn(move || {
+                let _ = patch_aoe2_lobby_name_in_memory(pid);
+            });
+        }
+
         // Give game a moment to initialize display, then minimize launcher
         std::thread::sleep(std::time::Duration::from_secs(2));
         let _ = window_clone.minimize();
@@ -637,18 +654,37 @@ struct PROCESSENTRY32W {
     szExeFile: [u16; 260],
 }
 
+#[repr(C)]
+#[allow(non_snake_case)]
+struct MEMORY_BASIC_INFORMATION {
+    BaseAddress: *mut std::ffi::c_void,
+    AllocationBase: *mut std::ffi::c_void,
+    AllocationProtect: u32,
+    PartitionId: u16,
+    RegionSize: usize,
+    State: u32,
+    Protect: u32,
+    Type: u32,
+}
+
 unsafe extern "system" {
     fn CreateToolhelp32Snapshot(dwFlags: u32, th32ProcessID: u32) -> *mut std::ffi::c_void;
     fn Process32FirstW(hSnapshot: *mut std::ffi::c_void, lppe: *mut PROCESSENTRY32W) -> i32;
     fn Process32NextW(hSnapshot: *mut std::ffi::c_void, lppe: *mut PROCESSENTRY32W) -> i32;
     fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+    fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut std::ffi::c_void;
+    fn VirtualQueryEx(hProcess: *mut std::ffi::c_void, lpAddress: *const std::ffi::c_void, lpBuffer: *mut MEMORY_BASIC_INFORMATION, dwLength: usize) -> usize;
+    fn VirtualProtectEx(hProcess: *mut std::ffi::c_void, lpAddress: *mut std::ffi::c_void, dwSize: usize, flNewProtect: u32, lpflOldProtect: *mut u32) -> i32;
+    fn ReadProcessMemory(hProcess: *mut std::ffi::c_void, lpBaseAddress: *const std::ffi::c_void, lpBuffer: *mut std::ffi::c_void, nSize: usize, lpNumberOfBytesRead: *mut usize) -> i32;
+    fn WriteProcessMemory(hProcess: *mut std::ffi::c_void, lpBaseAddress: *mut std::ffi::c_void, lpBuffer: *const std::ffi::c_void, nSize: usize, lpNumberOfBytesWritten: *mut usize) -> i32;
+    fn FlushInstructionCache(hProcess: *mut std::ffi::c_void, lpBaseAddress: *const std::ffi::c_void, dwSize: usize) -> i32;
 }
 
-fn is_process_running(process_name: &str) -> bool {
+fn get_process_id(process_name: &str) -> Option<u32> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(0x00000002, 0); // TH32CS_SNAPPROCESS
         if snapshot as isize == -1 || snapshot.is_null() {
-            return false;
+            return None;
         }
         let mut entry = PROCESSENTRY32W {
             dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
@@ -662,14 +698,14 @@ fn is_process_running(process_name: &str) -> bool {
             dwFlags: 0,
             szExeFile: [0; 260],
         };
-        let mut found = false;
+        let mut found_pid = None;
         if Process32FirstW(snapshot, &mut entry) != 0 {
             let target = process_name.to_lowercase();
             loop {
                 let null_pos = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
                 let name = String::from_utf16_lossy(&entry.szExeFile[..null_pos]).to_lowercase();
                 if name == target {
-                    found = true;
+                    found_pid = Some(entry.th32ProcessID);
                     break;
                 }
                 if Process32NextW(snapshot, &mut entry) == 0 {
@@ -678,7 +714,66 @@ fn is_process_running(process_name: &str) -> bool {
             }
         }
         CloseHandle(snapshot);
-        found
+        found_pid
+    }
+}
+
+fn is_process_running(process_name: &str) -> bool {
+    get_process_id(process_name).is_some()
+}
+
+fn patch_aoe2_lobby_name_in_memory(pid: u32) -> bool {
+    const PROCESS_ALL_ACCESS: u32 = 0x001F0FFF;
+    const MEM_COMMIT: u32 = 0x1000;
+    const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+    const PAGE_EXECUTE_READ: u32 = 0x20;
+    const PATTERN: [u8; 12] = [0x48, 0x83, 0x7d, 0x07, 0x00, 0x75, 0x12, 0x41, 0xc6, 0x46, 0x61, 0x01];
+
+    unsafe {
+        let h_proc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
+        if h_proc.is_null() {
+            return false;
+        }
+
+        // Try up to 30 times (polling every 500ms = 15s) for SteamStub to decrypt .text
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            let mut addr = 0usize;
+            let mut mbi = std::mem::zeroed::<MEMORY_BASIC_INFORMATION>();
+
+            while VirtualQueryEx(h_proc, addr as *const _, &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>()) != 0 {
+                let region_size = mbi.RegionSize;
+                let is_exec = (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | 0x10 | 0x80)) != 0;
+                if mbi.State == MEM_COMMIT && is_exec && region_size > 0 {
+                    let mut buf = vec![0u8; region_size.min(0x4000000)];
+                    let mut bytes_read = 0;
+                    if ReadProcessMemory(h_proc, mbi.BaseAddress as *const _, buf.as_mut_ptr() as *mut _, buf.len(), &mut bytes_read) != 0 {
+                        if let Some(pos) = buf[..bytes_read].windows(PATTERN.len()).position(|w| w == PATTERN) {
+                            let patch_addr = (mbi.BaseAddress as usize + pos + 5) as *mut std::ffi::c_void;
+                            let mut old_protect = 0;
+                            if VirtualProtectEx(h_proc, patch_addr, 2, PAGE_EXECUTE_READWRITE, &mut old_protect) != 0 {
+                                let nops: [u8; 2] = [0x90, 0x90];
+                                let mut written = 0;
+                                WriteProcessMemory(h_proc, patch_addr, nops.as_ptr() as *const _, 2, &mut written);
+                                VirtualProtectEx(h_proc, patch_addr, 2, old_protect, &mut old_protect);
+                                FlushInstructionCache(h_proc, patch_addr, 2);
+                                CloseHandle(h_proc);
+                                return true;
+                            }
+                        }
+                    }
+                }
+                let next_addr = mbi.BaseAddress as usize + region_size;
+                if next_addr <= addr || next_addr >= 0x7FFF_FFFF_FFFF {
+                    break;
+                }
+                addr = next_addr;
+            }
+        }
+
+        CloseHandle(h_proc);
+        false
     }
 }
 
