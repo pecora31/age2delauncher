@@ -10,6 +10,17 @@ use tauri::{Emitter, Manager, State, Window};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+static AGELANSERVER_CERT: &[u8] = include_bytes!("../resources/ageLANServer.cer");
+
+const HOSTS_DOMAINS: [&str; 6] = [
+    "aoe-api.reliclink.com",
+    "aoe-api.worldsedgelink.com",
+    "cdn.ageofempires.com",
+    "aoeliverelease1-api.worldsedgelink.com",
+    "pb-live-release1-api.worldsedgelink.com",
+    "pb-live-release2-api.worldsedgelink.com",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LauncherPreferences {
     pub game_dir: String,
@@ -238,85 +249,111 @@ fn cleanup_launcher_logs(tools_dir: &Path) {
     }
 }
 
-fn ensure_firewall_rules(game_dir: &Path, tools_dir: &Path) {
-    let aoe2_exe = game_dir.join("AoE2DE_s.exe");
-    let server_exe = tools_dir.join("server").join("server.exe");
-    let bserver_exe = tools_dir.join("battle-server-manager").join("BattleServer.exe");
-
-    if aoe2_exe.exists() {
-        let _ = Command::new("netsh")
-            .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Game_DirectLAN", "dir=in", "action=allow", &format!("program={}", aoe2_exe.to_string_lossy()), "enable=yes"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-    }
-    if server_exe.exists() {
-        let _ = Command::new("netsh")
-            .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Server_DirectLAN", "dir=in", "action=allow", &format!("program={}", server_exe.to_string_lossy()), "enable=yes"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-    }
-    if bserver_exe.exists() {
-        let _ = Command::new("netsh")
-            .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_BattleServer_DirectLAN", "dir=in", "action=allow", &format!("program={}", bserver_exe.to_string_lossy()), "enable=yes"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-    }
-    let _ = Command::new("netsh")
-        .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Ports_UDP_DirectLAN", "dir=in", "action=allow", "protocol=UDP", "localport=27015,30000-30020,31978", "enable=yes"])
+fn ensure_ca_certificate_installed() {
+    let check = Command::new("certutil")
+        .args(["-store", "Root", "83a7860a000280fca32b2a65d8f66d423abf127f"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
-    let _ = Command::new("netsh")
-        .args(["advfirewall", "firewall", "add", "rule", "name=AoE2DE_Ports_TCP_DirectLAN", "dir=in", "action=allow", "protocol=TCP", "localport=80,443,30000-30020", "enable=yes"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-}
 
-fn clean_stale_hosts_file() {
-    let hosts_path = Path::new(r"C:\Windows\System32\drivers\etc\hosts");
-    if hosts_path.exists() {
-        if let Ok(content) = fs::read_to_string(hosts_path) {
-            let patterns = [
-                "worldsedgelink.com",
-                "reliclink.com",
-                "ageofempires.com",
-                "playfabapi.com",
-            ];
-            let mut modified = false;
-            let cleaned_lines: Vec<&str> = content
-                .lines()
-                .filter(|line| {
-                    for pat in &patterns {
-                        if line.contains(pat) {
-                            modified = true;
-                            return false;
-                        }
-                    }
-                    true
-                })
-                .collect();
+    let already_installed = match check {
+        Ok(out) => out.status.success() && String::from_utf8_lossy(&out.stdout).contains("83a7860a"),
+        Err(_) => false,
+    };
 
-            if modified {
-                let mut new_content = cleaned_lines.join("\r\n");
-                if !new_content.ends_with("\r\n") {
-                    new_content.push_str("\r\n");
-                }
-                let _ = fs::write(hosts_path, new_content);
-            }
+    if !already_installed {
+        let temp_cert = std::env::temp_dir().join("ageLANServer_Root.cer");
+        if fs::write(&temp_cert, AGELANSERVER_CERT).is_ok() {
+            let _ = Command::new("certutil")
+                .args(["-addstore", "Root", temp_cert.to_str().unwrap_or("")])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+            let _ = fs::remove_file(temp_cert);
         }
     }
 }
 
-fn revert_network_routing(game_dir: &str, tools_dir: &Path) {
-    if !game_dir.is_empty() {
-        let config_exe = tools_dir.join("launcher").join("bin").join("config.exe");
-        if config_exe.exists() {
-            let _ = Command::new(&config_exe)
-                .args(["revert", "-e", "age2", "-i", "-l", "-s", "--gamePath", game_dir])
+fn setup_hosts(target_ip: &str) {
+    let hosts_path = Path::new(r"C:\Windows\System32\drivers\etc\hosts");
+    if !hosts_path.exists() {
+        return;
+    }
+
+    let _ = Command::new("attrib").args(["-r", hosts_path.to_str().unwrap_or("")]).creation_flags(CREATE_NO_WINDOW).status();
+
+    if let Ok(content) = fs::read_to_string(hosts_path) {
+        let filtered_lines: Vec<&str> = content
+            .lines()
+            .filter(|line| !line.contains("#ageLANServer") && !HOSTS_DOMAINS.iter().any(|d| line.contains(d)))
+            .collect();
+
+        let mut new_content = filtered_lines.join("\r\n");
+        if !new_content.is_empty() && !new_content.ends_with("\r\n") {
+            new_content.push_str("\r\n");
+        }
+
+        for domain in HOSTS_DOMAINS.iter() {
+            new_content.push_str(&format!("{} {} #ageLANServer\r\n", target_ip, domain));
+        }
+
+        let _ = fs::write(hosts_path, new_content);
+    }
+
+    let _ = Command::new("attrib").args(["+r", hosts_path.to_str().unwrap_or("")]).creation_flags(CREATE_NO_WINDOW).status();
+}
+
+#[allow(dead_code)]
+fn restore_hosts() {
+    let hosts_path = Path::new(r"C:\Windows\System32\drivers\etc\hosts");
+    if !hosts_path.exists() {
+        return;
+    }
+
+    let _ = Command::new("attrib").args(["-r", hosts_path.to_str().unwrap_or("")]).creation_flags(CREATE_NO_WINDOW).status();
+
+    if let Ok(content) = fs::read_to_string(hosts_path) {
+        let filtered_lines: Vec<&str> = content
+            .lines()
+            .filter(|line| !line.contains("#ageLANServer") && !HOSTS_DOMAINS.iter().any(|d| line.contains(d)))
+            .collect();
+
+        let mut new_content = filtered_lines.join("\r\n");
+        if !new_content.ends_with("\r\n") {
+            new_content.push_str("\r\n");
+        }
+
+        let _ = fs::write(hosts_path, new_content);
+    }
+
+    let _ = Command::new("attrib").args(["+r", hosts_path.to_str().unwrap_or("")]).creation_flags(CREATE_NO_WINDOW).status();
+}
+
+fn optimize_network_interfaces() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "Get-NetIPInterface | Where-Object { $_.InterfaceAlias -like '*Radmin*' -and $_.AddressFamily -eq 'IPv4' } | Set-NetIPInterface -InterfaceMetric 1"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
+fn ensure_firewall_rules(game_dir: &Path, tools_dir: &Path) {
+    let aoe2_exe = game_dir.join("AoE2DE_s.exe");
+    let loader_exe = game_dir.join("steamclient_loader_x64.exe");
+    let server_exe = tools_dir.join("server").join("server.exe");
+    let bsm_exe = tools_dir.join("battle-server-manager").join("battle-server-manager.exe");
+    let bserver_exe = game_dir.join("BattleServer").join("BattleServer.exe");
+
+    for exe in [&aoe2_exe, &loader_exe, &server_exe, &bsm_exe, &bserver_exe] {
+        if exe.exists() {
+            let name = exe.file_stem().unwrap_or_default().to_string_lossy();
+            let _ = Command::new("netsh")
+                .args(["advfirewall", "firewall", "add", "rule", &format!("name=AoE2_{}_In", name), "dir=in", "action=allow", &format!("program={}", exe.to_string_lossy()), "enable=yes"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+            let _ = Command::new("netsh")
+                .args(["advfirewall", "firewall", "add", "rule", &format!("name=AoE2_{}_Out", name), "dir=out", "action=allow", &format!("program={}", exe.to_string_lossy()), "enable=yes"])
                 .creation_flags(CREATE_NO_WINDOW)
                 .output();
         }
     }
-    clean_stale_hosts_file();
 }
 
 fn install_clean_vfx_mod(steam_id: &str) {
@@ -437,32 +474,45 @@ fn start_game(
         ));
     }
 
-    // 1. Resolve tools directory
+    // 1. Resolve paths
     let tools_dir = resolve_tools_dir();
-    let launcher_dir = tools_dir.join("launcher");
-    let launcher_exe = launcher_dir.join("launcher.exe");
+    let bsm_dir = tools_dir.join("battle-server-manager");
+    let bsm_exe = bsm_dir.join("battle-server-manager.exe");
+    let server_dir = tools_dir.join("server");
+    let server_exe = server_dir.join("server.exe");
 
-    if !launcher_exe.exists() {
-        return Err("launcher.exe is missing (quarantined by Windows Defender). Please add the launcher folder to Defender Exclusions.".to_string());
-    }
+    let loader_exe = game_path.join("steamclient_loader_x64.exe");
+    let target_game_exe = if loader_exe.exists() {
+        loader_exe
+    } else {
+        game_path.join("AoE2DE_s.exe")
+    };
 
     if prefs.is_host {
-        let server_exe = tools_dir.join("server").join("server.exe");
         if !server_exe.exists() {
             return Err("server.exe is missing (quarantined by Windows Defender as Bearfoos.A!ml). Please open Windows Security -> Protection history -> find server.exe -> Allow on device.".to_string());
         }
-        let bsm_exe = tools_dir.join("battle-server-manager").join("battle-server-manager.exe");
         if !bsm_exe.exists() {
             return Err("battle-server-manager.exe is missing (quarantined by Windows Defender). Please restore it from Windows Security.".to_string());
         }
     }
 
-    // 2. Update Goldberg steam_settings/configs.user.ini & persona files
+    // 2. Ensure CA Certificate is installed in Windows Trusted Root Store (SexDiablo architecture)
+    ensure_ca_certificate_installed();
+
+    // 3. Configure Windows hosts file (SexDiablo architecture)
+    let target_ip = if prefs.is_host { "127.0.0.1" } else { &prefs.host_ip };
+    setup_hosts(target_ip);
+
+    // 4. Optimize RadminVPN Interface Metric (SexDiablo architecture)
+    optimize_network_interfaces();
+
+    // 5. Update Goldberg / GSE settings & Player Name
     let settings_dir = game_path.join("steam_settings");
     let _ = fs::create_dir_all(&settings_dir);
     let user_ini_content = format!(
-        "[user::general]\naccount_name={}\npersona_name={}\naccount_steamid={}\nlanguage=english\nip_country=\n",
-        prefs.player_name, prefs.player_name, prefs.steam_id
+        "[user::general]\naccount_name={}\npersona_name={}\naccount_steamid={}\nlanguage=english\nip_country=\n\n[user::saves]\nsaves_folder_name=_GSE Save Data\nlocal_save_path={}\\_GSE Save Data\n",
+        prefs.player_name, prefs.player_name, prefs.steam_id, game_path.to_string_lossy()
     );
     let _ = fs::write(settings_dir.join("configs.user.ini"), &user_ini_content);
     let _ = fs::write(settings_dir.join("force_persona_name.txt"), &prefs.player_name);
@@ -490,7 +540,7 @@ fn start_game(
         let _ = fs::write(goldberg_settings.join("user_steam_id.txt"), &prefs.steam_id);
     }
 
-    // Prevent invisible units: disable UHD DLC 1039811 if graphics-uhd folder is missing
+    // 6. Prevent invisible units: disable UHD DLC 1039811 if graphics-uhd folder is missing
     let app_ini = settings_dir.join("configs.app.ini");
     let uhd_exists = game_path.join("resources").join("_common").join("drs").join("graphics-uhd").exists();
     if !uhd_exists && app_ini.exists() {
@@ -502,13 +552,20 @@ fn start_game(
         }
     }
 
-    // Clean up any legacy AoE2FixLobbyName.dll to prevent MSVC CRT thread crash
-    let legacy_fix_dll = game_path.join("dlls").join("AoE2FixLobbyName.dll");
-    if legacy_fix_dll.exists() {
-        let _ = fs::remove_file(legacy_fix_dll);
+    // 7. Clean up any foreign DLLs in dlls folder - ONLY Age2FakeOnline.dll must be present
+    let dll_dir = game_path.join("dlls");
+    if dll_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&dll_dir) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name.to_lowercase() != "age2fakeonline.dll" {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
     }
 
-    // 3. Fix ColdClientLoader.ini Exe=AoE2DE_s.exe
+    // 8. Fix ColdClientLoader.ini Exe=AoE2DE_s.exe
     let loader_ini = game_path.join("ColdClientLoader.ini");
     if loader_ini.exists() {
         if let Ok(content) = fs::read_to_string(&loader_ini) {
@@ -518,28 +575,9 @@ fn start_game(
         }
     }
 
-    // 4. Update tools/launcher/resources/config.age2.toml
-    let loader_exe = game_path.join("steamclient_loader_x64.exe");
-    let game_exe_str = if loader_exe.exists() {
-        loader_exe.to_string_lossy().to_string()
-    } else {
-        game_path.join("AoE2DE_s.exe").to_string_lossy().to_string()
-    };
-
-    let launcher_config_toml = launcher_dir.join("resources").join("config.age2.toml");
-    if launcher_config_toml.exists() {
-        if let Ok(mut text) = fs::read_to_string(&launcher_config_toml) {
-            let re_exe = Regex::new(r"(?m)^Executable\s*=.*$").unwrap();
-            let re_path = Regex::new(r"(?m)^Path\s*=.*$").unwrap();
-            text = re_exe.replace(&text, format!("Executable = '{}'", game_exe_str)).to_string();
-            text = re_path.replace(&text, format!("Path = '{}'", prefs.game_dir)).to_string();
-            let _ = fs::write(&launcher_config_toml, text);
-        }
-    }
-
-    // 5. If Host, update battle-server-manager and server configs
+    // 9. If Host, update battle-server-manager and server configs (SexDiablo & ageLANServer structure)
     if prefs.is_host {
-        let bsm_config_toml = tools_dir.join("battle-server-manager").join("resources").join("config.age2.toml");
+        let bsm_config_toml = bsm_dir.join("resources").join("config.age2.toml");
         if bsm_config_toml.exists() {
             if let Ok(mut text) = fs::read_to_string(&bsm_config_toml) {
                 let re_host = Regex::new(r"(?m)^Host\s*=.*$").unwrap();
@@ -552,80 +590,81 @@ fn start_game(
             }
         }
 
-        let server_config_toml = tools_dir.join("server").join("resources").join("config").join("config.toml");
+        let server_config_toml = server_dir.join("resources").join("config").join("config.toml");
         if server_config_toml.exists() {
             if let Ok(mut text) = fs::read_to_string(&server_config_toml) {
                 let re_hosts = Regex::new(r"(\[Games\.age2\][\s\S]*?Hosts\s*=\s*)\[.*?\]").unwrap();
                 text = re_hosts.replace(&text, format!("$1['{}', '127.0.0.1']", prefs.host_ip)).to_string();
+                let re_enabled = Regex::new(r"(?m)^Enabled\s*=.*$").unwrap();
+                text = re_enabled.replace(&text, "Enabled = ['age2']").to_string();
                 let _ = fs::write(&server_config_toml, text);
             }
         }
     }
 
-    // 6. Performance & Mod preparation
+    // 10. Performance, Mods & Firewall
     cleanup_launcher_logs(&tools_dir);
     install_clean_vfx_mod(&prefs.steam_id);
     ensure_firewall_rules(game_path, &tools_dir);
 
-    // Stop any dangling instances first
+    // 11. Stop any dangling instances first
     let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "launcher.exe", "/IM", "server.exe", "/IM", "BattleServer.exe", "/IM", "agent.exe"])
+        .args(["/F", "/IM", "AoE2DE_s.exe", "/IM", "steamclient_loader_x64.exe", "/IM", "server.exe", "/IM", "BattleServer.exe", "/IM", "battle-server-manager.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    // 7. Spawn Luskaner's launcher.exe (without --log to prevent disk I/O lag)
-    let mut cmd = Command::new(&launcher_exe);
-    cmd.current_dir(&launcher_dir);
-    cmd.arg("-e").arg("age2");
-    cmd.arg("--serverSingleAutoSelect");
-
+    // 12. If Host, launch battle-server-manager and server directly (SexDiablo standard)
     if prefs.is_host {
-        cmd.arg("-a").arg("true");
-    } else if !prefs.host_ip.is_empty() {
-        cmd.arg("-s").arg(&prefs.host_ip);
+        let _ = Command::new(&bsm_exe)
+            .current_dir(&bsm_dir)
+            .args(["start", "-e", "age2", "-w"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+
+        let _ = Command::new(&server_exe)
+            .current_dir(&server_dir)
+            .args(["-e", "age2"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+
+        std::thread::sleep(std::time::Duration::from_millis(1500));
     }
 
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    // 13. Spawn Game via steamclient_loader_x64.exe SKIPINTRO (SexDiablo standard)
+    let mut game_cmd = Command::new(&target_game_exe);
+    game_cmd.current_dir(game_path);
+    game_cmd.arg("SKIPINTRO");
+    game_cmd.creation_flags(CREATE_NO_WINDOW);
 
-    let child = cmd.spawn().map_err(|e| format!("Failed to spawn launcher.exe: {}", e))?;
+    let child = game_cmd.spawn().map_err(|e| format!("Failed to launch game: {}", e))?;
 
     let mut lock = state.child.lock().unwrap();
     *lock = Some(child);
 
     // Save preferences
-    let _ = save_preferences(prefs);
+    let _ = save_preferences(prefs.clone());
 
-    // 8. Background Watcher: Minimize launcher window to release GPU/VRAM to AoE2 DE,
-    // apply live memory patch for Lobby Name sanitization, and restore window when game finishes.
+    // 14. Background Watcher: Minimizes launcher, monitors game exit, restores launcher
     let window_clone = window.clone();
+    let is_host = prefs.is_host;
     std::thread::spawn(move || {
-        // Wait for game process to start (poll up to 60 times * 500ms = 30s)
-        let mut aoe_pid = None;
-        for _ in 0..60 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            if let Some(pid) = get_process_id("AoE2DE_s.exe") {
-                aoe_pid = Some(pid);
-                break;
-            }
-        }
-
-        // Asynchronously apply in-memory patch for instant lobby name creation
-        if let Some(pid) = aoe_pid {
-            std::thread::spawn(move || {
-                let _ = patch_aoe2_lobby_name_in_memory(pid);
-            });
-        }
-
-        // Give game a moment to initialize display, then minimize launcher
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::thread::sleep(std::time::Duration::from_secs(3));
         let _ = window_clone.minimize();
 
-        // Dormant watcher: sleeps 4 seconds between lightweight checks
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(4));
-            if !is_process_running("AoE2DE_s.exe") && !is_process_running("launcher.exe") {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if !is_process_running("AoE2DE_s.exe") && !is_process_running("steamclient_loader_x64.exe") {
+                if is_host {
+                    let _ = Command::new("taskkill")
+                        .args(["/F", "/IM", "server.exe", "/IM", "BattleServer.exe", "/IM", "battle-server-manager.exe"])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output();
+                }
+
                 let _ = window_clone.unminimize();
                 let _ = window_clone.show();
                 let _ = window_clone.set_focus();
@@ -653,30 +692,11 @@ struct PROCESSENTRY32W {
     szExeFile: [u16; 260],
 }
 
-#[repr(C)]
-#[allow(non_snake_case)]
-struct MEMORY_BASIC_INFORMATION {
-    BaseAddress: *mut std::ffi::c_void,
-    AllocationBase: *mut std::ffi::c_void,
-    AllocationProtect: u32,
-    PartitionId: u16,
-    RegionSize: usize,
-    State: u32,
-    Protect: u32,
-    Type: u32,
-}
-
 unsafe extern "system" {
     fn CreateToolhelp32Snapshot(dwFlags: u32, th32ProcessID: u32) -> *mut std::ffi::c_void;
     fn Process32FirstW(hSnapshot: *mut std::ffi::c_void, lppe: *mut PROCESSENTRY32W) -> i32;
     fn Process32NextW(hSnapshot: *mut std::ffi::c_void, lppe: *mut PROCESSENTRY32W) -> i32;
     fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
-    fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut std::ffi::c_void;
-    fn VirtualQueryEx(hProcess: *mut std::ffi::c_void, lpAddress: *const std::ffi::c_void, lpBuffer: *mut MEMORY_BASIC_INFORMATION, dwLength: usize) -> usize;
-    fn VirtualProtectEx(hProcess: *mut std::ffi::c_void, lpAddress: *mut std::ffi::c_void, dwSize: usize, flNewProtect: u32, lpflOldProtect: *mut u32) -> i32;
-    fn ReadProcessMemory(hProcess: *mut std::ffi::c_void, lpBaseAddress: *const std::ffi::c_void, lpBuffer: *mut std::ffi::c_void, nSize: usize, lpNumberOfBytesRead: *mut usize) -> i32;
-    fn WriteProcessMemory(hProcess: *mut std::ffi::c_void, lpBaseAddress: *mut std::ffi::c_void, lpBuffer: *const std::ffi::c_void, nSize: usize, lpNumberOfBytesWritten: *mut usize) -> i32;
-    fn FlushInstructionCache(hProcess: *mut std::ffi::c_void, lpBaseAddress: *const std::ffi::c_void, dwSize: usize) -> i32;
 }
 
 fn get_process_id(process_name: &str) -> Option<u32> {
@@ -721,76 +741,6 @@ fn is_process_running(process_name: &str) -> bool {
     get_process_id(process_name).is_some()
 }
 
-fn log_lobby_patch(msg: &str) {
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open("C:\\Games\\lobby_fix.log") {
-        use std::io::Write;
-        let _ = writeln!(f, "[Launcher Memory Patch] {}", msg);
-    }
-}
-
-fn patch_aoe2_lobby_name_in_memory(pid: u32) -> bool {
-    const PROCESS_ALL_ACCESS: u32 = 0x001F0FFF;
-    const MEM_COMMIT: u32 = 0x1000;
-    const PAGE_EXECUTE_READWRITE: u32 = 0x40;
-    const PAGE_EXECUTE_READ: u32 = 0x20;
-    const PATTERN: [u8; 12] = [0x48, 0x83, 0x7d, 0x07, 0x00, 0x75, 0x12, 0x41, 0xc6, 0x46, 0x61, 0x01];
-
-    log_lobby_patch(&format!("Attaching to AoE2DE_s.exe (PID: {})...", pid));
-
-    unsafe {
-        let h_proc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
-        if h_proc.is_null() {
-            log_lobby_patch(&format!("Failed to open process PID {} (error: {})", pid, std::io::Error::last_os_error()));
-            return false;
-        }
-
-        // Try up to 60 times (polling every 500ms = 30s) for SteamStub to decrypt .text
-        for attempt in 1..=60 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-
-            let mut addr = 0usize;
-            let mut mbi = std::mem::zeroed::<MEMORY_BASIC_INFORMATION>();
-
-            while VirtualQueryEx(h_proc, addr as *const _, &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>()) != 0 {
-                let region_size = mbi.RegionSize;
-                let is_exec = (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | 0x10 | 0x80)) != 0;
-                if mbi.State == MEM_COMMIT && is_exec && region_size > 0 {
-                    let mut buf = vec![0u8; region_size.min(0x4000000)];
-                    let mut bytes_read = 0;
-                    if ReadProcessMemory(h_proc, mbi.BaseAddress as *const _, buf.as_mut_ptr() as *mut _, buf.len(), &mut bytes_read) != 0 {
-                        if let Some(pos) = buf[..bytes_read].windows(PATTERN.len()).position(|w| w == PATTERN) {
-                            let patch_addr = (mbi.BaseAddress as usize + pos + 5) as *mut std::ffi::c_void;
-                            log_lobby_patch(&format!("Found pattern at {:p} on attempt {}! Applying NOP NOP...", patch_addr, attempt));
-                            let mut old_protect = 0;
-                            if VirtualProtectEx(h_proc, patch_addr, 2, PAGE_EXECUTE_READWRITE, &mut old_protect) != 0 {
-                                let nops: [u8; 2] = [0x90, 0x90];
-                                let mut written = 0;
-                                WriteProcessMemory(h_proc, patch_addr, nops.as_ptr() as *const _, 2, &mut written);
-                                VirtualProtectEx(h_proc, patch_addr, 2, old_protect, &mut old_protect);
-                                FlushInstructionCache(h_proc, patch_addr, 2);
-                                CloseHandle(h_proc);
-                                log_lobby_patch("Successfully patched lobby name sanitization instruction in memory!");
-                                return true;
-                            } else {
-                                log_lobby_patch(&format!("VirtualProtectEx failed (error: {})", std::io::Error::last_os_error()));
-                            }
-                        }
-                    }
-                }
-                let next_addr = mbi.BaseAddress as usize + region_size;
-                if next_addr <= addr || next_addr >= 0x7FFF_FFFF_FFFF {
-                    break;
-                }
-                addr = next_addr;
-            }
-        }
-
-        log_lobby_patch("Pattern not found in memory after 30 seconds.");
-        CloseHandle(h_proc);
-        false
-    }
-}
-
 #[tauri::command]
 fn stop_game(state: State<'_, AppState>) -> Result<(), String> {
     {
@@ -800,30 +750,22 @@ fn stop_game(state: State<'_, AppState>) -> Result<(), String> {
         }
     }
 
-    // Force terminate any lingering instances
     let _ = Command::new("taskkill")
         .args([
             "/F",
             "/IM",
-            "launcher.exe",
+            "AoE2DE_s.exe",
+            "/IM",
+            "steamclient_loader_x64.exe",
             "/IM",
             "server.exe",
             "/IM",
             "BattleServer.exe",
             "/IM",
             "battle-server-manager.exe",
-            "/IM",
-            "agent.exe",
-            "/IM",
-            "AoE2DE_s.exe",
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
-
-    // Revert hosts, certs and clean system hosts file
-    let prefs = load_preferences();
-    let tools_dir = resolve_tools_dir();
-    revert_network_routing(&prefs.game_dir, &tools_dir);
 
     Ok(())
 }
@@ -843,7 +785,7 @@ fn is_game_running(state: State<'_, AppState>) -> bool {
         }
     }
 
-    is_process_running("AoE2DE_s.exe") || is_process_running("launcher.exe")
+    is_process_running("AoE2DE_s.exe") || is_process_running("steamclient_loader_x64.exe")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -870,11 +812,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .setup(|_app| {
-            let prefs = load_preferences();
-            let tools_dir = resolve_tools_dir();
-            if !is_process_running("AoE2DE_s.exe") && !is_process_running("launcher.exe") {
-                revert_network_routing(&prefs.game_dir, &tools_dir);
-            }
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -898,9 +835,6 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let state = window.state::<AppState>();
                 let _ = stop_game(state);
-                let prefs = load_preferences();
-                let tools_dir = resolve_tools_dir();
-                revert_network_routing(&prefs.game_dir, &tools_dir);
             }
         })
         .run(tauri::generate_context!())
