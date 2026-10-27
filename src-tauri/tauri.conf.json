@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AoE2_LAN_Launcher",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "identifier": "com.aoe2.lan.launcher",
   "build": {
     "frontendDist": "../src"
@@ -27,3 +27,4 @@
     "active": false
   }
 }
+
